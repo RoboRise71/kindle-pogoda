@@ -47,6 +47,22 @@ def fetch_weather():
         return json.load(r)
 
 
+def fetch_air():
+    url = ("https://air-quality-api.open-meteo.com/v1/air-quality"
+           f"?latitude={LAT}&longitude={LON}"
+           "&current=european_aqi,pm2_5,pm10&timezone=Europe%2FWarsaw")
+    with urllib.request.urlopen(url, timeout=20) as r:
+        return json.load(r)["current"]
+
+
+def aqi_label(v):
+    for limit, name in ((20, "bardzo dobra"), (40, "dobra"), (60, "umiarkowana"),
+                        (80, "zła"), (100, "bardzo zła")):
+        if v < limit:
+            return name
+    return "fatalna"
+
+
 def describe(code):
     table = {
         0: ("Bezchmurnie", "sun"), 1: ("Przeważnie słonecznie", "sun"),
@@ -139,7 +155,7 @@ def text_c(d, xy, txt, f, fill=BLACK, anchor="mm"):
     d.text(xy, txt, font=f, fill=fill, anchor=anchor)
 
 
-def render(now, wx):
+def render(now, wx, air=None):
     img = Image.new("L", (W, H), WHITE)
     d = ImageDraw.Draw(img)
 
@@ -155,7 +171,7 @@ def render(now, wx):
         cur = wx["current"]
         desc, kind = describe(cur["weather_code"])
         night = cur.get("is_day", 1) == 0
-        draw_icon(d, kind, 105, y0 + 85, 75, night)
+        draw_icon(d, kind, 105, y0 + 74, 66, night)
         temp = round(cur["temperature_2m"])
         d.text((215, y0 + 2), f"{temp}°", font=font(96, bold=True), fill=BLACK)
         d.text((220, y0 + 118), desc, font=font(26, bold=True), fill=BLACK)
@@ -163,11 +179,20 @@ def render(now, wx):
         hi, lo = round(daily["temperature_2m_max"][0]), round(daily["temperature_2m_min"][0])
         d.text((220, y0 + 152), f"max {hi}°  min {lo}°   odczuw. {round(cur['apparent_temperature'])}°",
                font=font(20), fill=BLACK)
-        sr = daily["sunrise"][0][-5:]
-        ss = daily["sunset"][0][-5:]
         d.text((220, y0 + 178), f"wiatr {round(cur['wind_speed_10m'])} km/h   wilg. {cur['relative_humidity_2m']}%",
                font=font(20), fill=BLACK)
-        d.text((30, y0 + 178), f"↑{sr}  ↓{ss}", font=font(18), fill=GRAY)
+        if air and air.get("european_aqi") is not None:
+            v = air["european_aqi"]
+            bad = v >= 60
+            box = [18, y0 + 150, 198, y0 + 204]
+            if bad:
+                d.rounded_rectangle(box, radius=8, fill=BLACK)
+            else:
+                d.rounded_rectangle(box, radius=8, outline=BLACK, width=2)
+            col = WHITE if bad else BLACK
+            text_c(d, (108, y0 + 165), f"Powietrze: {aqi_label(v)}", font(15, bold=True), col)
+            pm = f"PM2.5 {round(air['pm2_5'])} · PM10 {round(air['pm10'])}"
+            text_c(d, (108, y0 + 188), pm, font(14), col)
 
         # --- Prognoza godzinowa ---
         y1 = y0 + 210
@@ -223,7 +248,10 @@ def render(now, wx):
                 text_c(d, (x, y), str(dd), font(19, bold=j >= 5), BLACK if dd > now.day or j >= 5 else GRAY)
 
     # --- Stopka ---
-    text_c(d, (W / 2, H - 12), f"{CITY} · aktualizacja {now:%H:%M}", font(14), GRAY)
+    sun = ""
+    if wx is not None:
+        sun = f" · wschód {wx['daily']['sunrise'][0][-5:]} · zachód {wx['daily']['sunset'][0][-5:]}"
+    text_c(d, (W / 2, H - 12), f"{CITY}{sun} · aktualizacja {now:%H:%M}", font(14), GRAY)
     return img
 
 
@@ -234,9 +262,14 @@ def main():
     except Exception as e:
         print("Pogoda niedostępna:", e, file=sys.stderr)
         wx = None
+    try:
+        air = json.load(open(os.environ["AIR_JSON"])) if os.environ.get("AIR_JSON") else fetch_air()
+    except Exception as e:
+        print("Jakość powietrza niedostępna:", e, file=sys.stderr)
+        air = None
     if os.environ.get("FAKE_NOW"):
         now = dt.datetime.fromisoformat(os.environ["FAKE_NOW"]).replace(tzinfo=TZ)
-    render(now, wx).save(OUT, optimize=True)
+    render(now, wx, air).save(OUT, optimize=True)
     print("Zapisano", OUT)
 
 
