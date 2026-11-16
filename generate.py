@@ -178,6 +178,78 @@ def draw_moon_phase(img, cx, cy, r, p):
     ImageDraw.Draw(img).ellipse([cx - r, cy - r, cx + r, cy + r], outline=BLACK, width=2)
 
 
+# ---- Zodiakalne bzdety ----
+SIGNS = [("♈", "Baran", "Baranie"), ("♉", "Byk", "Byku"), ("♊", "Bliźnięta", "Bliźniętach"),
+         ("♋", "Rak", "Raku"), ("♌", "Lew", "Lwie"), ("♍", "Panna", "Pannie"),
+         ("♎", "Waga", "Wadze"), ("♏", "Skorpion", "Skorpionie"), ("♐", "Strzelec", "Strzelcu"),
+         ("♑", "Koziorożec", "Koziorożcu"), ("♒", "Wodnik", "Wodniku"), ("♓", "Ryby", "Rybach")]
+
+HOROSCOPE = [
+    "Dobry dzień na drzemkę. Gwiazdy nie oceniają.",
+    "Ktoś dziś zje Twoje ostatnie ciastko. Ukryj je.",
+    "Kawa smakuje dziś o 12% lepiej. Sprawdź.",
+    "Unikaj podejmowania decyzji przed śniadaniem.",
+    "Niespodziewana wiadomość okaże się powiadomieniem o paczce.",
+    "Twoja intuicja ma rację. Zwłaszcza co do pizzy.",
+    "Dziś idealny dzień, żeby wreszcie odpisać na maila.",
+    "Planety radzą: parasol zamiast optymizmu.",
+    "Spotkasz kogoś ważnego. Prawdopodobnie w lustrze.",
+    "Energia kosmiczna sprzyja sprzątaniu szuflady.",
+    "Merkury nic nie zepsuje. Ty możesz.",
+    "Szczęście uśmiechnie się do Ciebie w kolejce.",
+    "Najlepsza decyzja dnia: jeszcze jedna herbata.",
+    "Gwiazdy mówią: odpocznij. Ty mówisz: nie mogę.",
+    "Dzień sprzyja zakupom. Portfel się nie zgadza.",
+    "Ktoś myśli o Tobie. Najpewniej Twój bank.",
+    "Wieczór przyniesie dobry serial i złą godzinę snu.",
+    "Księżyc sugeruje spacer nad Odrą.",
+    "Twój wewnętrzny spokój jest w trybie samolotowym.",
+    "Dzień idealny na nicnierobienie z poczuciem misji.",
+    "Odwaga dnia: otworzyć lodówkę po świętach.",
+    "Wszechświat wysyła sygnał. Zasięg słaby.",
+    "Sukces jest blisko. Mniej więcej tam, gdzie klucze.",
+    "Dobry moment na nowe hobby. Albo stare, porzucone.",
+    "Gwiazdy przewidują korki na Legnickiej.",
+    "Zaufaj sobie. Ale przeczytaj regulamin.",
+    "Rozmowa z bliską osobą rozwiąże więcej, niż myślisz.",
+    "Twoja aura ma dziś kolor e-papieru.",
+    "Dobry dzień, by komuś pomóc. Bez dzielenia się frytkami.",
+    "Planety ustawiły się w kształt kanapy.",
+    "Cierpliwość popłaca. Autobus i tak się spóźni.",
+    "Ktoś doceni Twój wysiłek. Pewnie kot.",
+    "Unikaj kłótni z drukarką.",
+    "Zmiana nadchodzi. Prognoza mówi, że to front.",
+    "Dziś nie musisz być produktywny. Jutro też nie.",
+    "Twój znak uwielbia dziś krasnale.",
+    "Wenus radzi: powiedz komuś miłe słowo.",
+    "Jowisz poleca obiad, który sam się nie ugotuje.",
+    "Mars mówi: wstań od biurka i się przeciągnij.",
+    "Saturn zaleca ciepłe skarpety.",
+]
+
+
+def sun_sign(now):
+    starts = [((1, 20), 10), ((2, 19), 11), ((3, 21), 0), ((4, 20), 1), ((5, 21), 2), ((6, 21), 3),
+              ((7, 23), 4), ((8, 23), 5), ((9, 23), 6), ((10, 23), 7), ((11, 22), 8), ((12, 22), 9)]
+    idx = 9  # Koziorożec do 19.01
+    for md, i in starts:
+        if (now.month, now.day) >= md:
+            idx = i
+    return SIGNS[idx]
+
+
+def moon_sign(now):
+    d = (now.astimezone(dt.timezone.utc) - dt.datetime(2000, 1, 1, 12, tzinfo=dt.timezone.utc)).total_seconds() / 86400
+    L = 218.316 + 13.176396 * d
+    M = math.radians(134.963 + 13.064993 * d)
+    lon = (L + 6.289 * math.sin(M)) % 360
+    return SIGNS[int(lon // 30)]
+
+
+def horoscope(now):
+    return HOROSCOPE[(now.toordinal() * 7919) % len(HOROSCOPE)]
+
+
 def text_c(d, xy, txt, f, fill=BLACK, anchor="mm"):
     d.text(xy, txt, font=f, fill=fill, anchor=anchor)
 
@@ -240,7 +312,7 @@ def render(now, wx, air=None):
             text_c(d, (x, y1 + 113), f"{p}%" if p is not None else "", font(15), GRAY)
 
         # --- Kolejne dni ---
-        y2 = y1 + 128
+        y2 = y1 + 124
         d.line([20, y2, W - 20, y2], fill=LIGHT, width=2)
         cw = (W - 40) / 4
         for k in range(1, 5):
@@ -254,8 +326,16 @@ def render(now, wx, air=None):
 
     # --- Kalendarz miesiąca ---
     yc = 572
-    d.line([20, yc - 8, W - 20, yc - 8], fill=LIGHT, width=2)
+    ms = moon_sign(now)
+    line = f"Księżyc w {ms[2]} {ms[0]} · {horoscope(now)}"
+    fs = 15
+    while fs > 10 and d.textlength(line, font=font(fs)) > W - 40:
+        fs -= 1
+    text_c(d, (W / 2, yc - 21), line, font(fs), BLACK)
+    d.line([20, yc - 6, W - 20, yc - 6], fill=LIGHT, width=2)
     text_c(d, (W / 2, yc + 12), f"{MONTHS_NOM[now.month - 1]} {now.year}", font(22, bold=True))
+    sg = sun_sign(now)
+    d.text((22, yc + 12), f"{sg[0]} {sg[1]}", font=font(15), fill=GRAY, anchor="lm")
     mp, mname = moon_phase(now)
     draw_moon_phase(img, W - 38, yc + 12, 12, mp)
     d.text((W - 58, yc + 12), mname, font=font(14), fill=GRAY, anchor="rm")
