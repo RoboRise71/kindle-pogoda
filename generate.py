@@ -151,6 +151,33 @@ def draw_icon(d, kind, cx, cy, r, night=False):
                 d.line([x - math.cos(a) * s, y - math.sin(a) * s, x + math.cos(a) * s, y + math.sin(a) * s], fill=BLACK, width=max(2, w - 1))
 
 
+SYNODIC = 29.530588853
+NEW_MOON_REF = dt.datetime(2000, 1, 6, 18, 14, tzinfo=dt.timezone.utc)
+PHASE_NAMES = ["nów", "przybywający sierp", "pierwsza kwadra", "przybywający garb",
+               "pełnia", "ubywający garb", "ostatnia kwadra", "ubywający sierp"]
+
+
+def moon_phase(now):
+    """Zwraca (faza 0..1, nazwa). 0 = nów, 0.5 = pełnia."""
+    days = (now.astimezone(dt.timezone.utc) - NEW_MOON_REF).total_seconds() / 86400
+    p = (days % SYNODIC) / SYNODIC
+    return p, PHASE_NAMES[int((p * 8) + 0.5) % 8]
+
+
+def draw_moon_phase(img, cx, cy, r, p):
+    k = math.cos(2 * math.pi * p)
+    px = img.load()
+    for y in range(int(cy - r), int(cy + r) + 1):
+        for x in range(int(cx - r), int(cx + r) + 1):
+            dx, dy = (x - cx) / r, (y - cy) / r
+            if dx * dx + dy * dy > 1:
+                continue
+            s = math.sqrt(max(0.0, 1 - dy * dy))
+            lit = dx > k * s if p < 0.5 else dx < -k * s
+            px[x, y] = WHITE if lit else BLACK
+    ImageDraw.Draw(img).ellipse([cx - r, cy - r, cx + r, cy + r], outline=BLACK, width=2)
+
+
 def text_c(d, xy, txt, f, fill=BLACK, anchor="mm"):
     d.text(xy, txt, font=f, fill=fill, anchor=anchor)
 
@@ -198,11 +225,11 @@ def render(now, wx, air=None):
         y1 = y0 + 210
         d.line([20, y1, W - 20, y1], fill=LIGHT, width=2)
         times = wx["hourly"]["time"]
-        start = next(i for i, t in enumerate(times) if dt.datetime.fromisoformat(t).replace(tzinfo=TZ) > now)
+        start = next((i for i, t in enumerate(times) if dt.datetime.fromisoformat(t).replace(tzinfo=TZ) > now), 0)
         cols = 6
         cw = (W - 40) / cols
         for k in range(cols):
-            i = start + k * 2
+            i = min(start + k * 2, len(times) - 1)
             x = 20 + cw * k + cw / 2
             hh = times[i][11:13]
             text_c(d, (x, y1 + 18), f"{hh}:00", font(17), GRAY)
@@ -229,6 +256,9 @@ def render(now, wx, air=None):
     yc = 572
     d.line([20, yc - 8, W - 20, yc - 8], fill=LIGHT, width=2)
     text_c(d, (W / 2, yc + 12), f"{MONTHS_NOM[now.month - 1]} {now.year}", font(22, bold=True))
+    mp, mname = moon_phase(now)
+    draw_moon_phase(img, W - 38, yc + 12, 12, mp)
+    d.text((W - 58, yc + 12), mname, font=font(14), fill=GRAY, anchor="rm")
     cal = calendar.Calendar(firstweekday=0).monthdayscalendar(now.year, now.month)
     cw = (W - 60) / 7
     gy = yc + 38
