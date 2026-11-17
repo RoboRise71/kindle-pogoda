@@ -35,6 +35,47 @@ def font(size, bold=False, cond=False):
     return ImageFont.truetype(os.path.join(HERE, "fonts", name), size)
 
 
+# ---- Pobieranie z ponawianiem i zapasem ----
+PAGES = "https://roborise71.github.io/kindle-pogoda/"
+SITE_DIR = os.path.dirname(os.path.abspath(OUT))
+
+
+def get_json(url, tries=4):
+    last = None
+    for i in range(tries):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "kindle-pogoda/1.0"})
+            with urllib.request.urlopen(req, timeout=30) as r:
+                return json.load(r)
+        except Exception as e:
+            last = e
+            print(f"Próba {i + 1}/{tries} nieudana ({url[:50]}…): {e}", file=sys.stderr)
+            if i < tries - 1:
+                import time
+                time.sleep([5, 15, 30][i])
+    raise last
+
+
+def with_backup(name, fetch):
+    """Pobierz świeże dane; zapisz kopię na stronę. Przy błędzie użyj kopii z poprzedniego razu."""
+    try:
+        data = fetch()
+        data["_fetched"] = dt.datetime.now(TZ).strftime("%H:%M")
+        with open(os.path.join(SITE_DIR, f"{name}.json"), "w") as f:
+            json.dump(data, f)
+        return data, False
+    except Exception as e:
+        print(f"{name}: brak świeżych danych ({e}), używam kopii", file=sys.stderr)
+        try:
+            data = get_json(PAGES + f"{name}.json", tries=2)
+            with open(os.path.join(SITE_DIR, f"{name}.json"), "w") as f:
+                json.dump(data, f)
+            return data, True
+        except Exception as e2:
+            print(f"{name}: kopia też niedostępna ({e2})", file=sys.stderr)
+            return None, False
+
+
 # ---- Pogoda ----
 def fetch_weather():
     url = ("https://api.open-meteo.com/v1/forecast"
@@ -43,16 +84,14 @@ def fetch_weather():
            "&hourly=temperature_2m,weather_code,precipitation_probability,is_day"
            "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset"
            "&timezone=Europe%2FWarsaw&forecast_days=5")
-    with urllib.request.urlopen(url, timeout=20) as r:
-        return json.load(r)
+    return get_json(url)
 
 
 def fetch_air():
     url = ("https://air-quality-api.open-meteo.com/v1/air-quality"
            f"?latitude={LAT}&longitude={LON}"
            "&current=european_aqi,pm2_5,pm10&timezone=Europe%2FWarsaw")
-    with urllib.request.urlopen(url, timeout=20) as r:
-        return json.load(r)["current"]
+    return get_json(url)["current"]
 
 
 def aqi_label(v):
@@ -254,7 +293,7 @@ def text_c(d, xy, txt, f, fill=BLACK, anchor="mm"):
     d.text(xy, txt, font=f, fill=fill, anchor=anchor)
 
 
-def render(now, wx, air=None):
+def render(now, wx, air=None, stale=None):
     img = Image.new("L", (W, H), WHITE)
     d = ImageDraw.Draw(img)
 
@@ -361,25 +400,27 @@ def render(now, wx, air=None):
     sun = ""
     if wx is not None:
         sun = f" · wschód {wx['daily']['sunrise'][0][-5:]} · zachód {wx['daily']['sunset'][0][-5:]}"
-    text_c(d, (W / 2, H - 12), f"{CITY}{sun} · aktualizacja {now:%H:%M}", font(14), GRAY)
+    upd = f"aktualizacja {now:%H:%M}" + (f" (pogoda z {stale})" if stale else "")
+    text_c(d, (W / 2, H - 12), f"{CITY}{sun} · {upd}", font(14), GRAY)
     return img
 
 
 def main():
     now = dt.datetime.now(TZ)
-    try:
-        wx = json.load(open(os.environ["WX_JSON"])) if os.environ.get("WX_JSON") else fetch_weather()
-    except Exception as e:
-        print("Pogoda niedostępna:", e, file=sys.stderr)
-        wx = None
-    try:
-        air = json.load(open(os.environ["AIR_JSON"])) if os.environ.get("AIR_JSON") else fetch_air()
-    except Exception as e:
-        print("Jakość powietrza niedostępna:", e, file=sys.stderr)
-        air = None
+    stale = None
+    if os.environ.get("WX_JSON"):
+        wx = json.load(open(os.environ["WX_JSON"]))
+    else:
+        wx, old = with_backup("weather", fetch_weather)
+        if old and wx:
+            stale = wx.get("_fetched")
+    if os.environ.get("AIR_JSON"):
+        air = json.load(open(os.environ["AIR_JSON"]))
+    else:
+        air, _ = with_backup("air", fetch_air)
     if os.environ.get("FAKE_NOW"):
         now = dt.datetime.fromisoformat(os.environ["FAKE_NOW"]).replace(tzinfo=TZ)
-    render(now, wx, air).save(OUT, optimize=True)
+    render(now, wx, air, stale).save(OUT, optimize=True)
     print("Zapisano", OUT)
 
 
