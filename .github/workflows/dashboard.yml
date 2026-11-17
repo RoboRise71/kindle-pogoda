@@ -1,9 +1,11 @@
 name: Kindle dashboard
 
+# Łańcuch: każde uruchomienie generuje obrazek, czeka do następnego :00 / :30
+# i samo odpala kolejne. Harmonogram cron jest tylko zapasem, gdyby łańcuch się przerwał.
 on:
   schedule:
-    - cron: "*/30 * * * *"   # co 30 minut
-  workflow_dispatch:          # ręczne uruchomienie
+    - cron: "7 */2 * * *"     # zapas co 2 godziny
+  workflow_dispatch:
   push:
     branches: [main]
 
@@ -11,9 +13,11 @@ permissions:
   contents: read
   pages: write
   id-token: write
+  actions: write
 
+# Nowe uruchomienie anuluje stare, więc zawsze działa tylko jeden łańcuch.
 concurrency:
-  group: pages
+  group: kindle-dashboard
   cancel-in-progress: true
 
 jobs:
@@ -35,3 +39,22 @@ jobs:
           path: site
       - id: deploy
         uses: actions/deploy-pages@v4
+
+  next:
+    needs: build
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Czekaj do następnego :00 / :30
+        run: |
+          now=$(date +%s)
+          next=$(( (now / 1800 + 1) * 1800 ))
+          wait=$(( next - now - 60 ))
+          [ $wait -lt 60 ] && wait=$(( wait + 1800 ))
+          echo "Czekam ${wait}s"
+          sleep $wait
+      - name: Uruchom kolejny przebieg
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run dashboard.yml --repo "${{ github.repository }}" --ref main
